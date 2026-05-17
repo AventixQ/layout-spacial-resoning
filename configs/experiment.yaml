@@ -1,0 +1,13 @@
+# Global experiment configuration.
+dataset:
+  train: data/splits/train.jsonl
+  validation: data/splits/validation.jsonl
+  test: data/splits/test.jsonl
+outputs:
+  generated_layouts: outputs/generated_layouts
+  metrics: outputs/metrics
+  error_analysis: outputs/error_analysis
+  statistical_tests: outputs/statistical_tests
+  rendered_forms: outputs/rendered_forms
+grid:
+  columns: 12

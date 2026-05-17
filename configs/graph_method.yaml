@@ -1,0 +1,12 @@
+# Graph community detection method configuration.
+similarity_threshold: 0.65
+algorithm: leiden
+default_widths:
+  long_text: 12
+  file: 12
+  date: 6
+  number: 6
+  boolean: 6
+  text: 6
+  choice: 6
+  multichoice: 12

@@ -1,0 +1,10 @@
+# Model configuration placeholders.
+llm:
+  provider: openai
+  model: TODO
+embedding:
+  provider: openai
+  model: text-embedding-3-small
+fine_tuned:
+  base_model: TODO
+  adapter_path: outputs/fine_tuned_adapter
