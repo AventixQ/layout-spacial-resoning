@@ -1,5 +1,6 @@
 """Generate tables for the thesis results chapter."""
 
+import os
 from pathlib import Path
 import sys
 
@@ -9,9 +10,16 @@ import pandas as pd
 
 
 def main() -> None:
-    metrics_path = Path("outputs/metrics/sample_metrics.csv")
-    output_csv_path = Path("outputs/metrics/sample_method_summary.csv")
-    output_markdown_path = Path("outputs/metrics/sample_method_summary.md")
+    metrics_path = Path(os.environ.get("METRICS_INPUT_PATH", "outputs/metrics/sample_metrics.csv"))
+    output_csv_path = Path(
+        os.environ.get("SUMMARY_CSV_PATH", "outputs/metrics/sample_method_summary.csv")
+    )
+    output_markdown_path = Path(
+        os.environ.get(
+            "SUMMARY_MARKDOWN_PATH",
+            "outputs/metrics/sample_method_summary.md",
+        )
+    )
 
     metrics = pd.read_csv(metrics_path)
     summary = (

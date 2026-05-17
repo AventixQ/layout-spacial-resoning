@@ -1,1 +1,19 @@
-TODO: Prompt for Method 1 structured-output layout generation.
+You are Method 1: Single Language Model Invocation with structured output.
+
+Generate the complete final layout in one step from the input controls.
+
+The API will enforce the output JSON Schema. You must still satisfy all layout
+constraints and use the exact input control ids.
+
+Rules:
+- Use a twelve-column grid.
+- Use exactly these output keys: sections, section_id, section_name, rows, row_id, controls, id, colStart, colSpan.
+- Every input control id must appear exactly once.
+- Do not invent control ids.
+- colStart and colSpan must be integers in [1, 12].
+- A control may not extend beyond column 12.
+- Controls in the same row must not overlap.
+- Group semantically related controls into coherent sections.
+- Put semantically related short controls in the same row when possible.
+- Preserve a natural form-completion reading order.
+- Use full-width rows for long_text and file controls unless another layout is clearly better.

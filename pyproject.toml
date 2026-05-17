@@ -18,6 +18,18 @@ dependencies = [
     "scikit-learn>=1.8.0",
     "scipy>=1.17.1",
     "seaborn>=0.13.2",
+    "streamlit>=1.57.0",
+]
+
+[project.optional-dependencies]
+lora = [
+    "accelerate",
+    "peft",
+    "torch",
+    "transformers",
+]
+lora-quantized = [
+    "bitsandbytes",
 ]
 
 [project.scripts]

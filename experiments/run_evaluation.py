@@ -1,6 +1,7 @@
 """Evaluate generated layouts."""
 
 import csv
+import os
 from pathlib import Path
 import sys
 
@@ -18,8 +19,15 @@ from layout_spatial_reasoning.evaluation.metrics import evaluate_generated_layou
 def main() -> None:
     forms_path = Path("data/processed/sample_forms.jsonl")
     order_constraints_path = Path("data/processed/order_constraints.jsonl")
-    generated_path = Path("outputs/generated_layouts/sample_baselines.jsonl")
-    output_path = Path("outputs/metrics/sample_metrics.csv")
+    generated_path = Path(
+        os.environ.get(
+            "GENERATED_LAYOUTS_PATH",
+            "outputs/generated_layouts/sample_baselines.jsonl",
+        )
+    )
+    output_path = Path(
+        os.environ.get("METRICS_OUTPUT_PATH", "outputs/metrics/sample_metrics.csv")
+    )
 
     forms = {form.form_id: form for form in load_forms_jsonl(forms_path)}
     extracted_constraints = (
