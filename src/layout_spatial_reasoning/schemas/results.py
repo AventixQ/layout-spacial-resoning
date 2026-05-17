@@ -23,6 +23,16 @@ class EvaluationRecord(BaseModel):
     form_id: str
     method: str
     grid_utilization: float
+    semantic_coherence_row: float
+    semantic_coherence_section: float
+    has_grid_constraint_violation: bool
+    has_row_underutilization: bool
+    has_orphan_field: bool
+    has_section_boundary_misplacement: bool
+    has_reading_order_violation: bool | None
+    row_underutilization_count: int
+    orphan_field_count: int
+    section_boundary_misplacement_score: float
     validation_error_count: int
     missing_control_count: int
     duplicated_control_count: int
@@ -30,4 +40,4 @@ class EvaluationRecord(BaseModel):
     grid_constraint_violation_count: int
     reading_order_constraint_count: int
     reading_order_violation_count: int
-    reading_order_violation_rate: float
+    reading_order_violation_rate: float | None

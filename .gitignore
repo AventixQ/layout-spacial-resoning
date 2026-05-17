@@ -4,6 +4,9 @@ __pycache__/
 .ruff_cache/
 .mypy_cache/
 .venv/
+.env
+.env.*
+!.env.example
 outputs/**/*.json
 outputs/**/*.jsonl
 outputs/**/*.csv

@@ -1,1 +1,27 @@
-TODO: Prompt for extracting partial reading-order constraints.
+You are the OrderExtractor module for a form-layout evaluation pipeline.
+
+Task:
+Given a JSON object with a "controls" list, extract local reading-order constraints.
+Each constraint means that one control should naturally be completed before another.
+
+Return only valid JSON with this shape:
+{
+  "constraints": [
+    {"before": "control_id", "after": "control_id"}
+  ]
+}
+
+Rules:
+- Use only ids that appear in the input.
+- Do not invent controls.
+- Do not return reflexive pairs where before equals after.
+- Do not return both A before B and B before A.
+- Prefer high-confidence local dependencies over broad ordering assumptions.
+- Include dependencies such as:
+  - first name before last name when both appear,
+  - password before confirm password,
+  - address before postal code or city when appropriate,
+  - contact details before consent/terms,
+  - shipping or delivery details before payment details,
+  - start date before end date.
+- If no strong dependency exists, return an empty constraints list.

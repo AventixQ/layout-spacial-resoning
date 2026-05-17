@@ -4,7 +4,11 @@ import json
 from pathlib import Path
 from typing import Iterable
 
-from layout_spatial_reasoning.schemas.form import FormSpec
+from layout_spatial_reasoning.schemas.form import (
+    FormSpec,
+    OrderConstraint,
+    OrderConstraintRecord,
+)
 from layout_spatial_reasoning.schemas.layout import Layout
 from layout_spatial_reasoning.schemas.results import GeneratedLayoutRecord
 
@@ -36,6 +40,35 @@ def load_generated_layouts_jsonl(path: str | Path) -> list[GeneratedLayoutRecord
                 message = f"Invalid generated layout JSON on line {line_number}: {error}"
                 raise ValueError(message) from error
     return records
+
+
+def load_order_constraints_jsonl(path: str | Path) -> dict[str, list[OrderConstraint]]:
+    """Load LLM-extracted order constraints keyed by form id."""
+    records: dict[str, list[OrderConstraint]] = {}
+    with Path(path).open(encoding="utf-8") as file:
+        for line_number, line in enumerate(file, start=1):
+            if not line.strip():
+                continue
+            try:
+                record = OrderConstraintRecord.model_validate_json(line)
+            except ValueError as error:
+                message = f"Invalid order constraints JSON on line {line_number}: {error}"
+                raise ValueError(message) from error
+            records[record.form_id] = record.constraints
+    return records
+
+
+def write_order_constraints_jsonl(
+    records: Iterable[OrderConstraintRecord],
+    path: str | Path,
+) -> None:
+    """Write LLM-extracted order constraints as JSONL records."""
+    output_path = Path(path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    with output_path.open("w", encoding="utf-8") as file:
+        for record in records:
+            file.write(record.model_dump_json())
+            file.write("\n")
 
 
 def write_layouts_jsonl(

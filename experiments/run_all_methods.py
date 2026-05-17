@@ -6,6 +6,9 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from layout_spatial_reasoning.dataset import load_forms_jsonl, write_layouts_jsonl
+from layout_spatial_reasoning.methods.graph_community import (
+    generate_layout_from_env as graph_layout,
+)
 from layout_spatial_reasoning.methods.random_baseline import generate_layout as random_layout
 from layout_spatial_reasoning.methods.sequential_baseline import (
     generate_layout as sequential_layout,
@@ -15,6 +18,7 @@ from layout_spatial_reasoning.methods.sequential_baseline import (
 METHODS = {
     "sequential": sequential_layout,
     "random": random_layout,
+    "graph_community": graph_layout,
 }
 
 

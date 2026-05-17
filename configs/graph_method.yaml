@@ -1,5 +1,5 @@
 # Graph community detection method configuration.
-similarity_threshold: 0.65
+similarity_threshold: 0.25
 algorithm: leiden
 default_widths:
   long_text: 12

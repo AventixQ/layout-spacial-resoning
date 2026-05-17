@@ -38,16 +38,16 @@ def reading_order_violation_count(
 def reading_order_violation_rate(
     layout: Layout,
     constraints: list[OrderConstraint],
-) -> float:
+) -> float | None:
     """Return the proportion of violated reading-order constraints."""
     if not constraints:
-        return 0.0
+        return None
     return reading_order_violation_count(layout, constraints) / len(constraints)
 
 
 def reading_order_violation(
     layout: Layout,
     constraints: list[OrderConstraint],
-) -> float:
+) -> float | None:
     """Backward-compatible alias for the reading-order violation rate."""
     return reading_order_violation_rate(layout, constraints)

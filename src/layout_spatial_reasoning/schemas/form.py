@@ -15,6 +15,15 @@ class OrderConstraint(BaseModel):
     after: str = Field(min_length=1)
 
 
+class OrderConstraintRecord(BaseModel):
+    """LLM-extracted reading-order constraints for one form."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    form_id: str = Field(min_length=1)
+    constraints: list[OrderConstraint] = Field(default_factory=list)
+
+
 class FormSpec(BaseModel):
     """One input form in the Form Layout Benchmark."""
 

@@ -31,3 +31,25 @@ def test_evaluate_generated_layout_counts_reading_order_violation():
 
     assert record.reading_order_violation_count == 1
     assert record.reading_order_violation_rate == 1.0
+    assert record.has_reading_order_violation is True
+
+
+def test_evaluate_generated_layout_marks_reading_order_as_not_applicable():
+    form = FormSpec(
+        form_id="contact",
+        domain="Contact",
+        controls=[Control(id="c01", label="Message", type="long_text")],
+        order_constraints=[],
+    )
+    layout = generate_layout(form.controls)
+    generated = GeneratedLayoutRecord(
+        form_id=form.form_id,
+        method="sequential",
+        layout=layout,
+    )
+
+    record = evaluate_generated_layout(form, generated)
+
+    assert record.reading_order_constraint_count == 0
+    assert record.reading_order_violation_rate is None
+    assert record.has_reading_order_violation is None

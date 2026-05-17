@@ -19,6 +19,28 @@ def main() -> None:
         .agg(
             form_count=("form_id", "count"),
             mean_grid_utilization=("grid_utilization", "mean"),
+            mean_semantic_coherence_row=("semantic_coherence_row", "mean"),
+            mean_semantic_coherence_section=("semantic_coherence_section", "mean"),
+            mean_row_underutilization=("row_underutilization_count", "mean"),
+            mean_orphan_fields=("orphan_field_count", "mean"),
+            mean_section_boundary_misplacement=(
+                "section_boundary_misplacement_score",
+                "mean",
+            ),
+            form_level_grid_constraint_violation=(
+                "has_grid_constraint_violation",
+                "mean",
+            ),
+            form_level_row_underutilization=("has_row_underutilization", "mean"),
+            form_level_orphan_field=("has_orphan_field", "mean"),
+            form_level_section_boundary_misplacement=(
+                "has_section_boundary_misplacement",
+                "mean",
+            ),
+            form_level_reading_order_violation=(
+                "has_reading_order_violation",
+                "mean",
+            ),
             mean_validation_errors=("validation_error_count", "mean"),
             mean_reading_order_violation_rate=(
                 "reading_order_violation_rate",

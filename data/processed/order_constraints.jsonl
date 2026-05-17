@@ -1,0 +1,3 @@
+{"form_id":"contact_basic","constraints":[]}
+{"form_id":"registration_basic","constraints":[{"before":"c01","after":"c02"},{"before":"c04","after":"c05"},{"before":"c03","after":"c06"}]}
+{"form_id":"checkout_basic","constraints":[{"before":"c01","after":"c02"},{"before":"c01","after":"c03"},{"before":"c01","after":"c04"},{"before":"c04","after":"c06"}]}

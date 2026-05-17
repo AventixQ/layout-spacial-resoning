@@ -48,3 +48,7 @@ def test_reading_order_violation_rate():
 
     assert reading_order_violation_count(layout, constraints) == 1
     assert reading_order_violation_rate(layout, constraints) == 0.5
+
+
+def test_reading_order_violation_rate_is_none_without_constraints():
+    assert reading_order_violation_rate(Layout(), []) is None
