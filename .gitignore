@@ -8,4 +8,5 @@ outputs/**/*.json
 outputs/**/*.jsonl
 outputs/**/*.csv
 outputs/**/*.html
+outputs/**/*.md
 !outputs/**/.gitkeep
