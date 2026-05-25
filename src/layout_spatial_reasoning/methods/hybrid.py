@@ -1,14 +1,12 @@
 """Hybrid graph grouping plus LLM refinement method."""
 
 import json
-import os
 from pathlib import Path
 from typing import Callable
 
-from openai import OpenAI
 from pydantic import BaseModel, ConfigDict, Field
 
-from layout_spatial_reasoning.config import env_float, env_int, env_str, load_env
+from layout_spatial_reasoning.config import env_float, env_int, env_str
 from layout_spatial_reasoning.embeddings.provider import (
     embed_texts,
     embedding_function_from_env,
@@ -21,6 +19,7 @@ from layout_spatial_reasoning.methods.llm_single import (
     _extract_json_object,
     controls_to_json,
 )
+from layout_spatial_reasoning.llm.providers import generate_json, provider_from_env
 from layout_spatial_reasoning.schemas.control import Control
 from layout_spatial_reasoning.schemas.layout import Layout
 from layout_spatial_reasoning.schemas.validation import validate_layout
@@ -58,6 +57,7 @@ def generate_layout(
     community_algorithm: str = "leiden",
     seed: int = 42,
     model: str | None = None,
+    provider: str | None = None,
 ) -> Layout:
     """Generate a layout by graph grouping followed by LLM refinement."""
     preliminary_division = build_preliminary_division(
@@ -71,6 +71,7 @@ def generate_layout(
         controls,
         preliminary_division,
         model=model,
+        provider=provider,
     )
 
 
@@ -82,7 +83,7 @@ def generate_layout_from_env(controls: list[Control]) -> Layout:
         similarity_threshold=env_float("GRAPH_SIMILARITY_THRESHOLD", 0.25),
         community_algorithm=env_str("GRAPH_COMMUNITY_ALGORITHM", "leiden") or "leiden",
         seed=env_int("GRAPH_RANDOM_SEED", 42),
-        model=env_str("OPENAI_LAYOUT_MODEL", "gpt-4.1"),
+        provider=provider_from_env(),
     )
 
 
@@ -126,17 +127,26 @@ def refine_and_arrange_openai(
     model: str | None = None,
 ) -> Layout:
     """Run the Method 5 LLM refinement and grid arrangement step."""
-    load_env()
-    api_key = os.environ.get("OPENAI_API_KEY")
-    if not api_key:
-        raise RuntimeError("OPENAI_API_KEY is required for Method 5.")
+    return refine_and_arrange_llm(
+        controls,
+        preliminary_division,
+        model=model,
+        provider="openai",
+    )
 
-    model_name = model or os.environ.get("OPENAI_LAYOUT_MODEL", "gpt-4.1")
-    client = OpenAI(api_key=api_key)
-    response = client.chat.completions.create(
-        model=model_name,
-        temperature=0,
-        response_format={"type": "json_object"},
+
+def refine_and_arrange_llm(
+    controls: list[Control],
+    preliminary_division: PreliminaryDivision,
+    *,
+    model: str | None = None,
+    provider: str | None = None,
+) -> Layout:
+    """Run the provider-neutral Method 5 refinement and grid arrangement step."""
+    provider_name = provider or provider_from_env()
+    content = generate_json(
+        provider_name,
+        model=model,
         messages=[
             {"role": "system", "content": HYBRID_PROMPT.read_text(encoding="utf-8")},
             {
@@ -145,10 +155,6 @@ def refine_and_arrange_openai(
             },
         ],
     )
-    content = response.choices[0].message.content
-    if content is None:
-        raise RuntimeError("Method 5 returned an empty response.")
-
     layout = parse_hybrid_response(content)
     errors = validate_layout(controls, layout)
     if errors:

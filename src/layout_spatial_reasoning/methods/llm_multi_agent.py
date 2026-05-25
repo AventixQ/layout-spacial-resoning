@@ -1,14 +1,12 @@
 """Multi-agent LLM layout generation."""
 
 import json
-import os
 from collections import Counter
 from pathlib import Path
 
-from openai import OpenAI
 from pydantic import BaseModel, ConfigDict, Field
 
-from layout_spatial_reasoning.config import load_env
+from layout_spatial_reasoning.llm.providers import generate_json, provider_from_env
 from layout_spatial_reasoning.methods.llm_single import (
     _extract_json_object,
     controls_to_json,
@@ -63,9 +61,10 @@ def generate_layout(
     controls: list[Control],
     *,
     model: str | None = None,
+    provider: str | None = None,
 ) -> Layout:
     """Generate a complete form layout through three LLM agents."""
-    return generate_layout_openai(controls, model=model)
+    return generate_layout_llm(controls, model=model, provider=provider)
 
 
 def generate_layout_openai(
@@ -74,38 +73,41 @@ def generate_layout_openai(
     model: str | None = None,
 ) -> Layout:
     """OpenAI implementation of Method 2."""
-    load_env()
-    api_key = os.environ.get("OPENAI_API_KEY")
-    if not api_key:
-        raise RuntimeError("OPENAI_API_KEY is required for Method 2.")
+    return generate_layout_llm(controls, model=model, provider="openai")
 
-    model_name = model or os.environ.get("OPENAI_LAYOUT_MODEL", "gpt-4.1")
-    client = OpenAI(api_key=api_key)
 
-    grouping = semantic_grouping_agent(client, controls, model=model_name)
+def generate_layout_llm(
+    controls: list[Control],
+    *,
+    model: str | None = None,
+    provider: str | None = None,
+) -> Layout:
+    """Provider-neutral implementation of Method 2."""
+    provider_name = provider or provider_from_env()
+    grouping = semantic_grouping_agent(controls, model=model, provider=provider_name)
     named_sections = section_naming_agent(
-        client,
         controls,
         grouping,
-        model=model_name,
+        model=model,
+        provider=provider_name,
     )
     return spatial_layout_agent(
-        client,
         controls,
         named_sections,
-        model=model_name,
+        model=model,
+        provider=provider_name,
     )
 
 
 def semantic_grouping_agent(
-    client: OpenAI,
     controls: list[Control],
     *,
-    model: str,
+    model: str | None,
+    provider: str,
 ) -> SemanticGrouping:
     """Agent 1: group controls by semantic relatedness."""
     content = _call_json_model(
-        client,
+        provider,
         model=model,
         system_prompt=GROUPING_PROMPT.read_text(encoding="utf-8"),
         payload={"controls": _controls_payload(controls)},
@@ -116,15 +118,15 @@ def semantic_grouping_agent(
 
 
 def section_naming_agent(
-    client: OpenAI,
     controls: list[Control],
     grouping: SemanticGrouping,
     *,
-    model: str,
+    model: str | None,
+    provider: str,
 ) -> NamedSections:
     """Agent 2: assign human-readable section names to fixed groups."""
     content = _call_json_model(
-        client,
+        provider,
         model=model,
         system_prompt=NAMING_PROMPT.read_text(encoding="utf-8"),
         payload={
@@ -138,15 +140,15 @@ def section_naming_agent(
 
 
 def spatial_layout_agent(
-    client: OpenAI,
     controls: list[Control],
     named_sections: NamedSections,
     *,
-    model: str,
+    model: str | None,
+    provider: str,
 ) -> Layout:
     """Agent 3: arrange named sections into the final grid layout."""
     content = _call_json_model(
-        client,
+        provider,
         model=model,
         system_prompt=LAYOUT_PROMPT.read_text(encoding="utf-8"),
         payload={
@@ -242,24 +244,21 @@ def controls_and_sections_to_json(
 
 
 def _call_json_model(
-    client: OpenAI,
+    provider: str,
     *,
-    model: str,
+    model: str | None,
     system_prompt: str,
     payload: dict[str, object],
 ) -> str:
-    response = client.chat.completions.create(
+    content = generate_json(
+        provider,
         model=model,
-        temperature=0,
         response_format={"type": "json_object"},
         messages=[
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
         ],
     )
-    content = response.choices[0].message.content
-    if content is None:
-        raise RuntimeError("Method 2 agent returned an empty response.")
     return _extract_json_object(content)
 
 

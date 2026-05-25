@@ -27,8 +27,11 @@ def generate_layout(
     controls: list[Control],
     *,
     model: str | None = None,
+    provider: str = "openai",
 ) -> Layout:
     """Generate a layout with a fine-tuned small model in one invocation."""
+    if provider == "local":
+        return generate_layout_local_lora(controls, model_path=model)
     return generate_layout_openai(controls, model=model)
 
 
@@ -196,6 +199,66 @@ def filter_layout_controls(layout: Layout, removed_control_ids: set[str]) -> Lay
 def parse_fine_tuned_response(content: str) -> Layout:
     """Parse a fine-tuned model response into the strict output schema."""
     return Layout.model_validate_json(_extract_json_object(content))
+
+
+def generate_layout_local_lora(
+    controls: list[Control],
+    *,
+    model_path: str | None = None,
+    base_model: str | None = None,
+    max_new_tokens: int = 2048,
+) -> Layout:
+    """Generate a layout with a local Qwen LoRA adapter."""
+    try:
+        import torch
+        from peft import PeftModel
+        from transformers import AutoModelForCausalLM, AutoTokenizer
+    except ImportError as error:
+        raise RuntimeError(
+            "Local LoRA inference dependencies are missing. Install them with "
+            "`uv sync --extra lora`."
+        ) from error
+
+    load_env()
+    adapter_path = model_path or os.environ.get("LORA_OUTPUT_DIR", "outputs/lora/method3")
+    base_model_name = (
+        base_model
+        or os.environ.get("LORA_BASE_MODEL")
+        or "Qwen/Qwen3-4B-Instruct-2507"
+    )
+    tokenizer = AutoTokenizer.from_pretrained(adapter_path)
+    model = AutoModelForCausalLM.from_pretrained(
+        base_model_name,
+        torch_dtype="auto",
+        device_map="auto",
+    )
+    model = PeftModel.from_pretrained(model, adapter_path)
+    model.eval()
+
+    messages = [
+        {"role": "system", "content": INFERENCE_PROMPT.read_text(encoding="utf-8")},
+        {"role": "user", "content": controls_to_json(controls)},
+    ]
+    prompt = tokenizer.apply_chat_template(
+        messages,
+        tokenize=False,
+        add_generation_prompt=True,
+    )
+    inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
+    with torch.no_grad():
+        output_ids = model.generate(
+            **inputs,
+            max_new_tokens=max_new_tokens,
+            do_sample=False,
+            pad_token_id=tokenizer.eos_token_id,
+        )
+    generated_ids = output_ids[0][inputs["input_ids"].shape[-1] :]
+    content = tokenizer.decode(generated_ids, skip_special_tokens=True)
+    layout = parse_fine_tuned_response(content)
+    errors = validate_layout(controls, layout)
+    if errors:
+        raise ValueError(f"Invalid local Method 3 layout: {'; '.join(errors)}")
+    return layout
 
 
 def _fine_tuned_model_from_env() -> str:

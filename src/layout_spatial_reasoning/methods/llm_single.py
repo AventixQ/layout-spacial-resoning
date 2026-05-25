@@ -1,13 +1,10 @@
 """Single-invocation LLM layout generation."""
 
 import json
-import os
 from pathlib import Path
 from typing import Literal
 
-from openai import OpenAI
-
-from layout_spatial_reasoning.config import load_env
+from layout_spatial_reasoning.llm.providers import generate_json, provider_from_env
 from layout_spatial_reasoning.schemas.control import Control
 from layout_spatial_reasoning.schemas.layout import Layout
 
@@ -34,13 +31,15 @@ def generate_layout(
     variant: PromptVariant = "structured_output",
     examples: list[tuple[list[Control], Layout]] | None = None,
     model: str | None = None,
+    provider: str | None = None,
 ) -> Layout:
     """Generate a complete form layout in one LLM invocation."""
-    return generate_layout_openai(
+    return generate_layout_llm(
         controls,
         variant=variant,
         examples=examples or [],
         model=model,
+        provider=provider,
     )
 
 
@@ -52,25 +51,34 @@ def generate_layout_openai(
     model: str | None = None,
 ) -> Layout:
     """OpenAI implementation of Method 1."""
-    load_env()
-    api_key = os.environ.get("OPENAI_API_KEY")
-    if not api_key:
-        raise RuntimeError("OPENAI_API_KEY is required for Method 1.")
+    return generate_layout_llm(
+        controls,
+        variant=variant,
+        examples=examples,
+        model=model,
+        provider="openai",
+    )
 
-    model_name = model or os.environ.get("OPENAI_LAYOUT_MODEL", "gpt-4.1")
-    client = OpenAI(api_key=api_key)
-    response = client.chat.completions.create(
-        model=model_name,
-        temperature=0,
+
+def generate_layout_llm(
+    controls: list[Control],
+    *,
+    variant: PromptVariant = "structured_output",
+    examples: list[tuple[list[Control], Layout]] | None = None,
+    model: str | None = None,
+    provider: str | None = None,
+) -> Layout:
+    """Provider-neutral implementation of Method 1."""
+    provider_name = provider or provider_from_env()
+    content = generate_json(
+        provider_name,
+        model=model,
         response_format=_response_format(variant),
         messages=[
             {"role": "system", "content": build_system_prompt(variant, examples or [])},
             {"role": "user", "content": controls_to_json(controls)},
         ],
     )
-    content = response.choices[0].message.content
-    if content is None:
-        raise RuntimeError("Method 1 returned an empty response.")
     return parse_layout_response(content)
 
 

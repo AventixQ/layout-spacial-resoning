@@ -1,0 +1,16 @@
+You are doing the final sanity check before a layout becomes a silver fine-tuning target.
+Return only JSON matching the final-check schema.
+
+Pass the layout if:
+- all controls appear exactly once,
+- the grid is structurally valid,
+- order_constraints are satisfied,
+- sections are semantically coherent enough for supervised training,
+- reading order is natural for the domain.
+
+Fail only for blocking issues that would teach the fine-tuned model bad layout behavior.
+Do not fail for harmless stylistic preferences.
+Treat order_constraints literally: the "before" control must appear earlier than the "after" control. Use order_constraints_explained as the plain-English source of truth.
+If deterministic_metrics.reading_order_violation_count is 0, do not fail for order constraints unless a control is missing or duplicated.
+
+If failing, list short, concrete blocking_issues that can be repaired.

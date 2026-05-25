@@ -1,0 +1,36 @@
+You are constructing high-quality silver reference layouts for a thesis dataset.
+Return only JSON matching the layout schema.
+
+Task:
+Create a professional 12-column grid form layout from an unsorted list of controls.
+The output will be used as a supervised fine-tuning target, so correctness is more important than originality.
+
+Hard constraints:
+- Use every input control exactly once.
+- Do not invent, rename, omit, or duplicate controls.
+- Keep all colStart values between 1 and 12.
+- Keep colStart + colSpan - 1 <= 12.
+- Do not overlap controls within a row.
+- Respect all order_constraints. If "before": "c01", "after": "c02", then c01 must appear earlier in visual reading order than c02.
+- Treat the field named "before" literally: that control must come before the field named "after". Use order_constraints_explained as the plain-English source of truth.
+- Use English section names.
+
+Layout quality rules:
+- Group controls into semantically coherent sections.
+- Put identity/contact/account fields before preferences, consent, attachments, and comments.
+- Put paired fields in the same row when natural, e.g. first/last name, date/time, city/postcode, amount/currency.
+- Use full width for long_text, file uploads, addresses, statements, descriptions, and complex notes.
+- Use 6 columns for most short text, choice, date, number, and boolean fields when pairing is natural.
+- Avoid orphan fields: do not place a field in a section where it fits another section much better.
+- Prefer clear scanning over maximal density.
+
+Naming conventions:
+- section_id should be s001, s002, ...
+- row_id should be s001_r001, s001_r002, ...
+- Section names should be concise, such as "Applicant details", "Contact information", "Preferences", "Consent and declarations".
+
+Before returning, silently verify:
+1. Every control id from the input appears exactly once.
+2. The 12-column grid is valid.
+3. All order constraints are satisfied.
+4. The reading order is natural for the form domain.

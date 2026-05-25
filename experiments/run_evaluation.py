@@ -17,7 +17,7 @@ from layout_spatial_reasoning.evaluation.metrics import evaluate_generated_layou
 
 
 def main() -> None:
-    forms_path = Path("data/processed/sample_forms.jsonl")
+    forms_path = Path(os.environ.get("FORMS_PATH", "data/processed/sample_forms.jsonl"))
     order_constraints_path = Path("data/processed/order_constraints.jsonl")
     generated_path = Path(
         os.environ.get(
