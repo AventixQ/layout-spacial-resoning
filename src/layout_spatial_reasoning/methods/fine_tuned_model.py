@@ -178,11 +178,15 @@ def filter_layout_controls(layout: Layout, removed_control_ids: set[str]) -> Lay
     for section in layout.sections:
         rows = []
         for row in section.rows:
-            row_controls = [
-                control
-                for control in row.controls
-                if control.id not in removed_control_ids
-            ]
+            col_start = 1
+            row_controls = []
+            for control in row.controls:
+                if control.id in removed_control_ids:
+                    continue
+                row_controls.append(
+                    control.model_copy(update={"colStart": col_start})
+                )
+                col_start += control.colSpan
             if row_controls:
                 rows.append(Row(row_id=row.row_id, controls=row_controls))
         if rows:

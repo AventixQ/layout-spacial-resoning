@@ -43,6 +43,7 @@ class LoraTrainingConfig:
     )
     load_in_4bit: bool = False
     gradient_checkpointing: bool = True
+    fail_on_truncation: bool = True
 
 
 def build_lora_config_from_env() -> LoraTrainingConfig:
@@ -67,6 +68,8 @@ def build_lora_config_from_env() -> LoraTrainingConfig:
             if module.strip()
         ),
         load_in_4bit=(env_str("LORA_LOAD_IN_4BIT", "false") or "false").lower()
+        == "true",
+        fail_on_truncation=(env_str("LORA_FAIL_ON_TRUNCATION", "true") or "true").lower()
         == "true",
     )
 
@@ -111,6 +114,7 @@ def tokenize_supervised_record(
     tokenizer: Any,
     *,
     max_length: int,
+    fail_on_truncation: bool = True,
 ) -> dict[str, list[int]]:
     """Tokenize one chat record and mask prompt tokens in labels."""
     messages = record["messages"]
@@ -124,17 +128,25 @@ def tokenize_supervised_record(
     prompt_tokens = tokenizer(
         prompt_text,
         add_special_tokens=False,
-        truncation=True,
-        max_length=max_length,
+        truncation=False,
     )["input_ids"]
     tokenized = tokenizer(
         full_text,
         add_special_tokens=False,
-        truncation=True,
-        max_length=max_length,
+        truncation=False,
     )
     input_ids = tokenized["input_ids"]
+    if len(input_ids) > max_length:
+        if fail_on_truncation:
+            raise ValueError(
+                "Record exceeds LORA_MAX_LENGTH: "
+                f"{len(input_ids)} tokens > {max_length}. "
+                "Increase LORA_MAX_LENGTH or disable LORA_FAIL_ON_TRUNCATION."
+            )
+        input_ids = input_ids[:max_length]
     attention_mask = tokenized.get("attention_mask", [1] * len(input_ids))
+    attention_mask = attention_mask[: len(input_ids)]
+    prompt_tokens = prompt_tokens[: len(input_ids)]
     prompt_length = min(len(prompt_tokens), len(input_ids))
     labels = [IGNORE_INDEX] * prompt_length + input_ids[prompt_length:]
 
@@ -208,6 +220,7 @@ def train_lora(
         load_chat_jsonl(train_path),
         tokenizer,
         max_length=cfg.max_length,
+        fail_on_truncation=cfg.fail_on_truncation,
     )
     eval_dataset = None
     if validation_path is not None:
@@ -215,6 +228,7 @@ def train_lora(
             load_chat_jsonl(validation_path),
             tokenizer,
             max_length=cfg.max_length,
+            fail_on_truncation=cfg.fail_on_truncation,
         )
 
     training_args = TrainingArguments(**_training_arguments_kwargs(cfg, eval_dataset))
@@ -232,9 +246,21 @@ def train_lora(
 
 
 class _TokenizedChatDataset:
-    def __init__(self, records, tokenizer, *, max_length: int):
+    def __init__(
+        self,
+        records,
+        tokenizer,
+        *,
+        max_length: int,
+        fail_on_truncation: bool,
+    ):
         self._items = [
-            tokenize_supervised_record(record, tokenizer, max_length=max_length)
+            tokenize_supervised_record(
+                record,
+                tokenizer,
+                max_length=max_length,
+                fail_on_truncation=fail_on_truncation,
+            )
             for record in records
         ]
 

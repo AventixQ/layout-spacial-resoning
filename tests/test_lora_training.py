@@ -60,6 +60,38 @@ def test_tokenize_supervised_record_masks_prompt_tokens():
     assert len(tokenized["input_ids"]) == len(tokenized["labels"])
 
 
+def test_tokenize_supervised_record_rejects_truncation_by_default():
+    record = {
+        "messages": [
+            {"role": "system", "content": "Rules"},
+            {"role": "user", "content": "Input controls"},
+            {"role": "assistant", "content": '{"sections":[]}'},
+        ]
+    }
+
+    with pytest.raises(ValueError, match="exceeds LORA_MAX_LENGTH"):
+        tokenize_supervised_record(record, FakeTokenizer(), max_length=2)
+
+
+def test_tokenize_supervised_record_can_truncate_when_explicitly_allowed():
+    record = {
+        "messages": [
+            {"role": "system", "content": "Rules"},
+            {"role": "user", "content": "Input controls"},
+            {"role": "assistant", "content": '{"sections":[]}'},
+        ]
+    }
+
+    tokenized = tokenize_supervised_record(
+        record,
+        FakeTokenizer(),
+        max_length=2,
+        fail_on_truncation=False,
+    )
+
+    assert len(tokenized["input_ids"]) == 2
+
+
 def test_load_chat_jsonl_validates_records(tmp_path: Path):
     path = tmp_path / "train.jsonl"
     path.write_text(
@@ -113,6 +145,7 @@ def test_build_lora_config_from_env(monkeypatch):
     assert config.output_dir == "outputs/test-lora"
     assert config.target_modules == ("q_proj", "v_proj")
     assert config.lora_rank == 8
+    assert config.fail_on_truncation
 
 
 def test_default_lora_base_model_is_qwen3_4b(monkeypatch):
