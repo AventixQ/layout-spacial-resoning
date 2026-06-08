@@ -106,3 +106,33 @@ sbatch --export=ALL,VLLM_MODEL=Qwen/Qwen3-8B,EXPERIMENT_LIMIT=20 cluster/layout_
 sbatch --export=ALL,VLLM_MODEL=speakleash/Bielik-11B-v3.0-Instruct,EXPERIMENT_LIMIT=20 cluster/layout_vllm_api_val.sbatch
 sbatch --export=ALL,VLLM_MODEL=CYFRAGOVPL/Llama-PLLuM-8B-instruct-2512,EXPERIMENT_LIMIT=20 cluster/layout_vllm_api_val.sbatch
 ```
+
+## vLLM overnight validation + test
+
+Run one vLLM server and evaluate validation and test sequentially in the same
+24-hour SLURM job. Results are written to separate experiment directories:
+
+```bash
+sbatch --export=ALL,VLLM_MODEL=Qwen/Qwen3-4B-Instruct-2507,EXPERIMENT_LIMIT=0 cluster/layout_vllm_api_val_test.sbatch
+```
+
+Default outputs for Qwen 4B:
+
+```bash
+outputs/experiments/vllm_qwen_qwen3-4b-instruct-2507_val_full
+outputs/experiments/vllm_qwen_qwen3-4b-instruct-2507_test_full
+```
+
+The overnight job defaults to prompt-only JSON generation:
+
+```bash
+OPENAI_RESPONSE_FORMAT_MODE=disabled
+EXPERIMENT_SINGLE_VARIANTS=zero_shot,few_shot,cot
+EXPERIMENT_METHODS=single_zero_shot,single_few_shot,single_cot,multi_agent,hybrid
+```
+
+To include vLLM guided structured output in the same job:
+
+```bash
+sbatch --export=ALL,VLLM_MODEL=Qwen/Qwen3-4B-Instruct-2507,EXPERIMENT_LIMIT=0,OPENAI_RESPONSE_FORMAT_MODE=vllm_guided_json,EXPERIMENT_SINGLE_VARIANTS=zero_shot,few_shot,cot,structured_output cluster/layout_vllm_api_val_test.sbatch
+```

@@ -1,12 +1,12 @@
 #!/bin/bash
-#SBATCH --job-name=layout-vllm-api
+#SBATCH --job-name=layout-vllm-vt
 #SBATCH --partition=gpu
 #SBATCH --gres=gpu:nvidia_geforce_rtx_4090:1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=56G
-#SBATCH --time=10:00:00
-#SBATCH --output=/home/s504297/jobs/logs/layout_vllm_api_%j.out
-#SBATCH --error=/home/s504297/jobs/logs/layout_vllm_api_%j.err
+#SBATCH --time=24:00:00
+#SBATCH --output=/home/s504297/jobs/logs/layout_vllm_val_test_%j.out
+#SBATCH --error=/home/s504297/jobs/logs/layout_vllm_val_test_%j.err
 
 set -euo pipefail
 
@@ -39,6 +39,7 @@ IMAGE="${VLLM_IMAGE:-/home/s504297/vllm901.sif}"
 MAX_MODEL_LEN="${VLLM_MAX_MODEL_LEN:-8192}"
 GPU_MEMORY_UTILIZATION="${VLLM_GPU_MEMORY_UTILIZATION:-0.90}"
 SERVED_MODEL_NAME="${VLLM_SERVED_MODEL_NAME:-layout-local-model}"
+SPLITS="${VLLM_SPLITS:-val,test}"
 
 if command -v apptainer >/dev/null 2>&1; then
   CONTAINER_RUNTIME="apptainer"
@@ -55,27 +56,27 @@ if [ ! -f "$IMAGE" ]; then
 fi
 
 SAFE_MODEL="$(printf '%s' "$MODEL" | tr '/:.' '___' | tr -cd '[:alnum:]_-' | tr '[:upper:]' '[:lower:]')"
-LIMIT_TAG="${EXPERIMENT_LIMIT:-20}"
+LIMIT_TAG="${EXPERIMENT_LIMIT:-0}"
 if [ "$LIMIT_TAG" = "0" ]; then
   LIMIT_TAG="full"
 fi
 
-export FORMS_PATH="${FORMS_PATH:-data/splits/val.jsonl}"
-export EXPERIMENT_LIMIT="${EXPERIMENT_LIMIT:-20}"
+export EXPERIMENT_LIMIT="${EXPERIMENT_LIMIT:-0}"
 export DEFAULT_EMBEDDING_PROVIDER="${DEFAULT_EMBEDDING_PROVIDER:-local}"
 export EXPERIMENT_LLM_PROVIDERS="openai"
 export OPENAI_API_KEY="${OPENAI_API_KEY:-EMPTY}"
 export OPENAI_BASE_URL="http://127.0.0.1:${PORT}/v1"
 export OPENAI_LAYOUT_MODEL="$SERVED_MODEL_NAME"
-export OPENAI_RESPONSE_FORMAT_MODE="${OPENAI_RESPONSE_FORMAT_MODE:-vllm_guided_json}"
+export OPENAI_RESPONSE_FORMAT_MODE="${OPENAI_RESPONSE_FORMAT_MODE:-disabled}"
 export INCLUDE_FINE_TUNED_MODEL=false
 export INCLUDE_LOCAL_LORA=false
-export EXPERIMENT_SINGLE_VARIANTS="${EXPERIMENT_SINGLE_VARIANTS:-zero_shot,few_shot,cot,structured_output}"
+export EXPERIMENT_SINGLE_VARIANTS="${EXPERIMENT_SINGLE_VARIANTS:-zero_shot,few_shot,cot}"
 export EXPERIMENT_METHODS="${EXPERIMENT_METHODS:-single_zero_shot,single_few_shot,single_cot,multi_agent,hybrid}"
-if [[ ",$EXPERIMENT_SINGLE_VARIANTS," == *",structured_output,"* ]]; then
+if [[ ",$EXPERIMENT_SINGLE_VARIANTS," == *",structured_output,"* ]] && [[ ",$EXPERIMENT_METHODS," != *",single_structured_output,"* ]]; then
   export EXPERIMENT_METHODS="${EXPERIMENT_METHODS},single_structured_output"
 fi
-export EXPERIMENT_RUN_ID="${EXPERIMENT_RUN_ID:-vllm_${SAFE_MODEL}_val_${LIMIT_TAG}}"
+
+SERVER_RUN_ID="vllm_${SAFE_MODEL}_val_test_${LIMIT_TAG}"
 
 nvidia-smi
 echo "Node        : $(hostname)"
@@ -83,8 +84,7 @@ echo "Model       : $MODEL"
 echo "Served name : $SERVED_MODEL_NAME"
 echo "Image       : $IMAGE"
 echo "Base URL    : $OPENAI_BASE_URL"
-echo "Run ID      : $EXPERIMENT_RUN_ID"
-echo "Forms       : $FORMS_PATH"
+echo "Splits      : $SPLITS"
 echo "Limit       : $EXPERIMENT_LIMIT"
 echo "Methods     : $EXPERIMENT_METHODS"
 echo "Single vars : $EXPERIMENT_SINGLE_VARIANTS"
@@ -102,7 +102,7 @@ echo "Resp format : $OPENAI_RESPONSE_FORMAT_MODE"
     --dtype auto \
     --max-model-len "$MAX_MODEL_LEN" \
     --gpu-memory-utilization "$GPU_MEMORY_UTILIZATION" \
-    > "/home/s504297/jobs/logs/${EXPERIMENT_RUN_ID}_vllm_server.log" 2>&1 &
+    > "/home/s504297/jobs/logs/${SERVER_RUN_ID}_vllm_server.log" 2>&1 &
 
 SERVER_PID=$!
 trap 'kill "$SERVER_PID" 2>/dev/null || true; rm -rf "$NODE_TMP" 2>/dev/null || true' EXIT
@@ -115,14 +115,31 @@ for attempt in $(seq 1 120); do
   fi
   if ! kill -0 "$SERVER_PID" 2>/dev/null; then
     echo "vLLM server exited early. Server log:" >&2
-    tail -120 "/home/s504297/jobs/logs/${EXPERIMENT_RUN_ID}_vllm_server.log" >&2 || true
+    tail -120 "/home/s504297/jobs/logs/${SERVER_RUN_ID}_vllm_server.log" >&2 || true
     exit 1
   fi
   sleep 5
 done
 
 curl -fsS "${OPENAI_BASE_URL}/models"
-uv run python experiments/run_full_experiment.py
 
-cat "outputs/experiments/${EXPERIMENT_RUN_ID}/manifest.json"
-cat "outputs/experiments/${EXPERIMENT_RUN_ID}/metrics/method_summary.md"
+IFS=',' read -ra SPLIT_LIST <<< "$SPLITS"
+for split in "${SPLIT_LIST[@]}"; do
+  split="$(printf '%s' "$split" | xargs)"
+  export FORMS_PATH="data/splits/${split}.jsonl"
+  export EXPERIMENT_RUN_ID="vllm_${SAFE_MODEL}_${split}_${LIMIT_TAG}"
+
+  echo "Running split=$split"
+  echo "Run ID: $EXPERIMENT_RUN_ID"
+  echo "Forms : $FORMS_PATH"
+
+  uv run python experiments/run_full_experiment.py
+
+  EXPERIMENT_RUN_DIR="outputs/experiments/${EXPERIMENT_RUN_ID}" \
+    FORMS_PATH="$FORMS_PATH" \
+    uv run python experiments/diagnose_experiment_results.py
+
+  cat "outputs/experiments/${EXPERIMENT_RUN_ID}/manifest.json"
+  cat "outputs/experiments/${EXPERIMENT_RUN_ID}/metrics/method_summary.md"
+  cat "outputs/experiments/${EXPERIMENT_RUN_ID}/diagnostics/diagnostics.md"
+done
