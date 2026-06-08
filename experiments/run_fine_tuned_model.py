@@ -1,6 +1,7 @@
 """Run Method 3 fine-tuned model inference on sample forms."""
 
 import json
+import os
 from pathlib import Path
 import sys
 
@@ -11,17 +12,37 @@ from layout_spatial_reasoning.methods.fine_tuned_model import generate_layout
 
 
 def main() -> None:
-    input_path = Path("data/processed/sample_forms.jsonl")
-    output_path = Path("outputs/generated_layouts/sample_fine_tuned_model.jsonl")
-    errors_path = Path("outputs/generated_layouts/sample_fine_tuned_model_errors.jsonl")
+    input_path = Path(os.environ.get("FORMS_PATH", "data/processed/sample_forms.jsonl"))
+    output_path = Path(
+        os.environ.get(
+            "FINE_TUNED_OUTPUT_PATH",
+            "outputs/generated_layouts/sample_fine_tuned_model.jsonl",
+        )
+    )
+    errors_path = Path(
+        os.environ.get(
+            "FINE_TUNED_ERRORS_PATH",
+            "outputs/generated_layouts/sample_fine_tuned_model_errors.jsonl",
+        )
+    )
+    provider = os.environ.get("FINE_TUNED_PROVIDER", "openai")
+    model = os.environ.get("FINE_TUNED_MODEL") or None
+    start = int(os.environ.get("FINE_TUNED_START", "0"))
+    limit = int(os.environ.get("FINE_TUNED_LIMIT", "0"))
 
     forms = load_forms_jsonl(input_path)
+    forms = forms[start : start + limit] if limit else forms[start:]
     records = []
     errors = []
-    for form in forms:
-        method = "fine_tuned_model"
+    method = f"{provider}_fine_tuned_model"
+    for index, form in enumerate(forms, start=1):
+        print(
+            f"[fine-tuned] {index}/{len(forms)} {form.form_id} "
+            f"controls={len(form.controls)}",
+            flush=True,
+        )
         try:
-            layout = generate_layout(form.controls)
+            layout = generate_layout(form.controls, provider=provider, model=model)
         except Exception as error:  # noqa: BLE001 - experiment runner records failures.
             errors.append(
                 {

@@ -69,6 +69,9 @@ def main() -> None:
         os.environ.get("ORDER_CONSTRAINTS_PATH", "data/processed/order_constraints.jsonl")
     )
     forms = load_forms_jsonl(forms_path)
+    start = int(os.environ.get("EXPERIMENT_START", "0"))
+    limit = int(os.environ.get("EXPERIMENT_LIMIT", "0"))
+    forms = forms[start : start + limit] if limit else forms[start:]
     order_constraints = (
         load_order_constraints_jsonl(order_constraints_path)
         if order_constraints_path.exists()
@@ -79,6 +82,11 @@ def main() -> None:
     errors = []
     latency_rows = []
     plans = build_experiment_plan()
+    print(
+        f"Running {len(plans)} plans on {len(forms)} forms "
+        f"from {forms_path} (start={start}, limit={limit or 'all'}).",
+        flush=True,
+    )
     for plan in plans:
         records, plan_errors, plan_latency = run_generation_plan(forms, plan)
         layout_records.extend(records)
@@ -129,11 +137,14 @@ def main() -> None:
 
 def build_experiment_plan() -> list[dict[str, str]]:
     """Build the full provider/method execution plan from environment config."""
-    plans: list[dict[str, str]] = [
-        {"method": "sequential", "provider": "local", "model": ""},
-        {"method": "random", "provider": "local", "model": ""},
-        {"method": "graph_community", "provider": "local", "model": ""},
-    ]
+    selected_methods = _selected_methods()
+    plans: list[dict[str, str]] = []
+    if _method_enabled("sequential", selected_methods):
+        plans.append({"method": "sequential", "provider": "local", "model": ""})
+    if _method_enabled("random", selected_methods):
+        plans.append({"method": "random", "provider": "local", "model": ""})
+    if _method_enabled("graph_community", selected_methods):
+        plans.append({"method": "graph_community", "provider": "local", "model": ""})
 
     providers = [
         normalize_provider(provider)
@@ -145,7 +156,10 @@ def build_experiment_plan() -> list[dict[str, str]]:
     ]
     for provider in providers:
         model = model_from_env(provider)
-        for variant in SINGLE_VARIANTS:
+        for variant in _single_variants_for_provider(provider):
+            method_key = f"single_{variant}"
+            if not _method_enabled(method_key, selected_methods):
+                continue
             plans.append(
                 {
                     "method": f"{provider}_{slug(model)}_llm_single_{variant}",
@@ -155,24 +169,29 @@ def build_experiment_plan() -> list[dict[str, str]]:
                     "variant": variant,
                 }
             )
-        plans.append(
-            {
-                "method": f"{provider}_{slug(model)}_llm_multi_agent",
-                "provider": provider,
-                "model": model,
-                "kind": "llm_multi_agent",
-            }
-        )
-        plans.append(
-            {
-                "method": f"{provider}_{slug(model)}_hybrid",
-                "provider": provider,
-                "model": model,
-                "kind": "hybrid",
-            }
-        )
+        if _method_enabled("multi_agent", selected_methods):
+            plans.append(
+                {
+                    "method": f"{provider}_{slug(model)}_llm_multi_agent",
+                    "provider": provider,
+                    "model": model,
+                    "kind": "llm_multi_agent",
+                }
+            )
+        if _method_enabled("hybrid", selected_methods):
+            plans.append(
+                {
+                    "method": f"{provider}_{slug(model)}_hybrid",
+                    "provider": provider,
+                    "model": model,
+                    "kind": "hybrid",
+                }
+            )
 
-    if os.environ.get("INCLUDE_FINE_TUNED_MODEL", "false").lower() == "true":
+    if (
+        os.environ.get("INCLUDE_FINE_TUNED_MODEL", "false").lower() == "true"
+        and _method_enabled("fine_tuned_openai", selected_methods)
+    ):
         model = os.environ.get("FINE_TUNED_LAYOUT_MODEL", "")
         plans.append(
             {
@@ -183,7 +202,10 @@ def build_experiment_plan() -> list[dict[str, str]]:
             }
         )
 
-    if os.environ.get("INCLUDE_LOCAL_LORA", "false").lower() == "true":
+    if (
+        os.environ.get("INCLUDE_LOCAL_LORA", "false").lower() == "true"
+        and _method_enabled("fine_tuned_local", selected_methods)
+    ):
         model = os.environ.get("LORA_OUTPUT_DIR", "outputs/lora/method3")
         plans.append(
             {
@@ -197,24 +219,68 @@ def build_experiment_plan() -> list[dict[str, str]]:
     return plans
 
 
+def _selected_methods() -> set[str] | None:
+    raw = os.environ.get("EXPERIMENT_METHODS", "")
+    methods = {item.strip() for item in raw.split(",") if item.strip()}
+    return methods or None
+
+
+def _method_enabled(method: str, selected_methods: set[str] | None) -> bool:
+    if selected_methods is None:
+        return True
+    if method in selected_methods:
+        return True
+    if method.startswith("single_") and "single" in selected_methods:
+        return True
+    if method in {"sequential", "random", "graph_community"} and "baselines" in selected_methods:
+        return True
+    if method in {"fine_tuned_openai", "fine_tuned_local"} and "fine_tuned" in selected_methods:
+        return True
+    return False
+
+
+def _single_variants_for_provider(provider: str) -> list[PromptVariant]:
+    variants = [
+        variant.strip()
+        for variant in os.environ.get("EXPERIMENT_SINGLE_VARIANTS", "").split(",")
+        if variant.strip()
+    ]
+    selected = variants or list(SINGLE_VARIANTS)
+    if provider == "local_hf" and os.environ.get(
+        "LOCAL_HF_INCLUDE_STRUCTURED_OUTPUT",
+        "false",
+    ).lower() != "true":
+        selected = [variant for variant in selected if variant != "structured_output"]
+    return [variant for variant in selected if variant in SINGLE_VARIANTS]
+
+
 def run_generation_plan(forms, plan: dict[str, str]):
     """Run one method/provider plan over all forms and collect errors."""
     records = []
     errors = []
     latency_rows = []
-    if plan["provider"] in PROVIDER_ENV_KEYS and not os.environ.get(
-        PROVIDER_ENV_KEYS[plan["provider"]]
-    ):
+    print(
+        f"[experiment] plan start method={plan['method']} "
+        f"provider={plan['provider']} forms={len(forms)}",
+        flush=True,
+    )
+    api_key = PROVIDER_ENV_KEYS.get(plan["provider"], "")
+    if api_key and not os.environ.get(api_key):
         error = {
             "method": plan["method"],
             "provider": plan["provider"],
             "model": plan["model"],
             "error_type": "MissingApiKey",
-            "error": f"{PROVIDER_ENV_KEYS[plan['provider']]} is not set.",
+            "error": f"{api_key} is not set.",
         }
         return records, [error], latency_rows
 
     for form_index, form in enumerate(forms, start=1):
+        print(
+            f"[experiment] {plan['method']} {form_index}/{len(forms)} "
+            f"{form.form_id} controls={len(form.controls)}",
+            flush=True,
+        )
         started_at = perf_counter()
         try:
             layout = generate_for_plan(form.controls, form_index, plan)
@@ -238,6 +304,11 @@ def run_generation_plan(forms, plan: dict[str, str]):
             }
         )
         records.append((form.form_id, plan["method"], layout))
+    print(
+        f"[experiment] plan done method={plan['method']} "
+        f"records={len(records)} errors={len(errors)}",
+        flush=True,
+    )
     return records, errors, latency_rows
 
 

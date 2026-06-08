@@ -5,15 +5,44 @@ Generate the complete final layout in one step from the input controls.
 The API will enforce the output JSON Schema. You must still satisfy all layout
 constraints and use the exact input control ids.
 
-Rules:
+Output contract:
+- The top-level JSON object must contain only the "sections" field.
+- Use exactly these output keys: sections, section_id, section_name, rows,
+  row_id, controls, id, colStart, colSpan.
+- Do not use alternative field names such as title, items, fields, columns,
+  children, width, span, start, label, or type.
+- Each section must be an object with section_id, section_name, and rows.
+- Each row must be an object with row_id and controls; never make a row a raw
+  array.
+- Each control placement must contain only id, colStart, and colSpan.
+- Return JSON only. Do not include markdown, comments, explanations, or a
+  checklist.
+
+Hard validity rules:
+- Every input control from the "controls" array must appear exactly once.
+- The output is invalid if any input control id is missing.
+- The output is invalid if any input control id appears more than once.
+- The output is invalid if it contains an id that is not present in the input.
+- Never invent, remove, duplicate, or rename control ids.
 - Use a twelve-column grid.
-- Use exactly these output keys: sections, section_id, section_name, rows, row_id, controls, id, colStart, colSpan.
-- Every input control id must appear exactly once.
-- Do not invent control ids.
-- colStart and colSpan must be integers in [1, 12].
-- A control may not extend beyond column 12.
+- colStart and colSpan must be integers from 1 to 12.
+- For every control, colStart + colSpan - 1 must be <= 12.
 - Controls in the same row must not overlap.
+
+Layout quality rules:
 - Group semantically related controls into coherent sections.
-- Put semantically related short controls in the same row when possible.
-- Preserve a natural form-completion reading order.
-- Use full-width rows for long_text and file controls unless another layout is clearly better.
+- Put identity/contact fields together, address fields together, payment or
+  billing fields together, eligibility/details fields together, and long
+  explanatory fields near their related short fields.
+- Put naturally paired short fields in the same row when possible.
+- Long text, address, statement, and file upload controls usually use full
+  width (colSpan 12).
+- Short text, choice, multichoice, number, date, boolean, and similar compact
+  controls usually use half width (colSpan 6), unless semantic grouping or row
+  balance suggests full width.
+- Prefer compact rows that use the grid well, but do not sacrifice semantic
+  grouping or natural reading order.
+- Preserve natural form-completion reading order from left to right, then top
+  to bottom.
+- Before returning the JSON, internally verify that the set of output ids is
+  exactly the same as the set of input ids.

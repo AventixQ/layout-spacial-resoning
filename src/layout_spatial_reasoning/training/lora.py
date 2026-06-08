@@ -44,6 +44,7 @@ class LoraTrainingConfig:
     load_in_4bit: bool = False
     gradient_checkpointing: bool = True
     fail_on_truncation: bool = True
+    resume_from_checkpoint: str | None = None
 
 
 def build_lora_config_from_env() -> LoraTrainingConfig:
@@ -62,6 +63,7 @@ def build_lora_config_from_env() -> LoraTrainingConfig:
         gradient_accumulation_steps=env_int("LORA_GRADIENT_ACCUMULATION_STEPS", 8),
         lora_rank=env_int("LORA_RANK", 16),
         lora_alpha=env_int("LORA_ALPHA", 32),
+        save_steps=env_int("LORA_SAVE_STEPS", 100),
         target_modules=tuple(
             module.strip()
             for module in (target_modules or "").split(",")
@@ -71,6 +73,7 @@ def build_lora_config_from_env() -> LoraTrainingConfig:
         == "true",
         fail_on_truncation=(env_str("LORA_FAIL_ON_TRUNCATION", "true") or "true").lower()
         == "true",
+        resume_from_checkpoint=env_str("LORA_RESUME_FROM_CHECKPOINT", None),
     )
 
 
@@ -239,7 +242,7 @@ def train_lora(
         eval_dataset=eval_dataset,
         data_collator=_SupervisedDataCollator(tokenizer.pad_token_id),
     )
-    trainer.train()
+    trainer.train(resume_from_checkpoint=cfg.resume_from_checkpoint)
     model.save_pretrained(cfg.output_dir)
     tokenizer.save_pretrained(cfg.output_dir)
     return cfg.output_dir

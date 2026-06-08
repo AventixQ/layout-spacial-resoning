@@ -1,0 +1,121 @@
+#!/bin/bash
+#SBATCH --job-name=layout-vllm-api
+#SBATCH --partition=gpu
+#SBATCH --gres=gpu:nvidia_geforce_rtx_4090:1
+#SBATCH --cpus-per-task=8
+#SBATCH --mem=56G
+#SBATCH --time=10:00:00
+#SBATCH --output=/home/s504297/jobs/logs/layout_vllm_api_%j.out
+#SBATCH --error=/home/s504297/jobs/logs/layout_vllm_api_%j.err
+
+set -euo pipefail
+
+PROJECT_DIR="${PROJECT_DIR:-/work/s504297/layout-spacial-resoning}"
+cd "$PROJECT_DIR"
+
+export PATH="/work/s504297/bin:$PATH"
+export UV_CACHE_DIR="${UV_CACHE_DIR:-/work/s504297/uv-cache}"
+export UV_PYTHON_INSTALL_DIR="${UV_PYTHON_INSTALL_DIR:-/work/s504297/uv-python}"
+export HF_HOME="${HF_HOME:-/work/s504297/hf-cache}"
+export TRANSFORMERS_CACHE="${TRANSFORMERS_CACHE:-/work/s504297/hf-cache}"
+export TORCH_HOME="${TORCH_HOME:-/work/s504297/torch-cache}"
+export TMPDIR="${TMPDIR:-/work/s504297/tmp}"
+export PYTHONDONTWRITEBYTECODE=1
+export PYTHONPYCACHEPREFIX="${PYTHONPYCACHEPREFIX:-/work/s504297/pycache}"
+export TOKENIZERS_PARALLELISM=false
+
+mkdir -p "$UV_CACHE_DIR" "$UV_PYTHON_INSTALL_DIR" "$HF_HOME" "$TORCH_HOME" "$TMPDIR" "$PYTHONPYCACHEPREFIX" /home/s504297/jobs/logs
+
+MODEL="${VLLM_MODEL:-Qwen/Qwen3-4B-Instruct-2507}"
+PORT="${VLLM_PORT:-8000}"
+IMAGE="${VLLM_IMAGE:-/home/s504297/vllm901.sif}"
+MAX_MODEL_LEN="${VLLM_MAX_MODEL_LEN:-8192}"
+GPU_MEMORY_UTILIZATION="${VLLM_GPU_MEMORY_UTILIZATION:-0.90}"
+SERVED_MODEL_NAME="${VLLM_SERVED_MODEL_NAME:-layout-local-model}"
+
+if command -v apptainer >/dev/null 2>&1; then
+  CONTAINER_RUNTIME="apptainer"
+elif command -v singularity >/dev/null 2>&1; then
+  CONTAINER_RUNTIME="singularity"
+else
+  echo "Neither apptainer nor singularity is available." >&2
+  exit 1
+fi
+
+if [ ! -f "$IMAGE" ]; then
+  echo "Missing VLLM_IMAGE: $IMAGE" >&2
+  exit 1
+fi
+
+SAFE_MODEL="$(printf '%s' "$MODEL" | tr '/:.' '___' | tr -cd '[:alnum:]_-' | tr '[:upper:]' '[:lower:]')"
+LIMIT_TAG="${EXPERIMENT_LIMIT:-20}"
+if [ "$LIMIT_TAG" = "0" ]; then
+  LIMIT_TAG="full"
+fi
+
+export FORMS_PATH="${FORMS_PATH:-data/splits/val.jsonl}"
+export EXPERIMENT_LIMIT="${EXPERIMENT_LIMIT:-20}"
+export DEFAULT_EMBEDDING_PROVIDER="${DEFAULT_EMBEDDING_PROVIDER:-local}"
+export EXPERIMENT_LLM_PROVIDERS="openai"
+export OPENAI_API_KEY="${OPENAI_API_KEY:-EMPTY}"
+export OPENAI_BASE_URL="http://127.0.0.1:${PORT}/v1"
+export OPENAI_LAYOUT_MODEL="$SERVED_MODEL_NAME"
+export OPENAI_RESPONSE_FORMAT_MODE="${OPENAI_RESPONSE_FORMAT_MODE:-vllm_guided_json}"
+export INCLUDE_FINE_TUNED_MODEL=false
+export INCLUDE_LOCAL_LORA=false
+export EXPERIMENT_SINGLE_VARIANTS="${EXPERIMENT_SINGLE_VARIANTS:-zero_shot,few_shot,cot,structured_output}"
+export EXPERIMENT_METHODS="${EXPERIMENT_METHODS:-single_zero_shot,single_few_shot,single_cot,multi_agent,hybrid}"
+if [[ ",$EXPERIMENT_SINGLE_VARIANTS," == *",structured_output,"* ]]; then
+  export EXPERIMENT_METHODS="${EXPERIMENT_METHODS},single_structured_output"
+fi
+export EXPERIMENT_RUN_ID="${EXPERIMENT_RUN_ID:-vllm_${SAFE_MODEL}_val_${LIMIT_TAG}}"
+
+nvidia-smi
+echo "Node        : $(hostname)"
+echo "Model       : $MODEL"
+echo "Served name : $SERVED_MODEL_NAME"
+echo "Image       : $IMAGE"
+echo "Base URL    : $OPENAI_BASE_URL"
+echo "Run ID      : $EXPERIMENT_RUN_ID"
+echo "Forms       : $FORMS_PATH"
+echo "Limit       : $EXPERIMENT_LIMIT"
+echo "Methods     : $EXPERIMENT_METHODS"
+echo "Single vars : $EXPERIMENT_SINGLE_VARIANTS"
+echo "Resp format : $OPENAI_RESPONSE_FORMAT_MODE"
+
+"$CONTAINER_RUNTIME" exec --nv \
+  --bind /work:/work \
+  --bind /home:/home \
+  "$IMAGE" \
+  python -m vllm.entrypoints.openai.api_server \
+    --model "$MODEL" \
+    --served-model-name "$SERVED_MODEL_NAME" \
+    --host 127.0.0.1 \
+    --port "$PORT" \
+    --dtype auto \
+    --max-model-len "$MAX_MODEL_LEN" \
+    --gpu-memory-utilization "$GPU_MEMORY_UTILIZATION" \
+    > "/home/s504297/jobs/logs/${EXPERIMENT_RUN_ID}_vllm_server.log" 2>&1 &
+
+SERVER_PID=$!
+trap 'kill "$SERVER_PID" 2>/dev/null || true' EXIT
+
+echo "Waiting for vLLM server..."
+for attempt in $(seq 1 120); do
+  if curl -fsS "${OPENAI_BASE_URL}/models" >/dev/null 2>&1; then
+    echo "vLLM is ready."
+    break
+  fi
+  if ! kill -0 "$SERVER_PID" 2>/dev/null; then
+    echo "vLLM server exited early. Server log:" >&2
+    tail -120 "/home/s504297/jobs/logs/${EXPERIMENT_RUN_ID}_vllm_server.log" >&2 || true
+    exit 1
+  fi
+  sleep 5
+done
+
+curl -fsS "${OPENAI_BASE_URL}/models"
+uv run python experiments/run_full_experiment.py
+
+cat "outputs/experiments/${EXPERIMENT_RUN_ID}/manifest.json"
+cat "outputs/experiments/${EXPERIMENT_RUN_ID}/metrics/method_summary.md"

@@ -10,24 +10,29 @@ from openai import OpenAI
 from layout_spatial_reasoning.config import load_env
 
 
-LLMProvider = Literal["openai", "gemini", "claude"]
+LLMProvider = Literal["openai", "gemini", "claude", "local_hf"]
+
+_LOCAL_HF_CACHE = {}
 
 PROVIDER_ENV_KEYS = {
     "openai": "OPENAI_API_KEY",
     "gemini": "GOOGLE_API_KEY",
     "claude": "ANTHROPIC_API_KEY",
+    "local_hf": "",
 }
 
 PROVIDER_MODEL_ENV_KEYS = {
     "openai": "OPENAI_LAYOUT_MODEL",
     "gemini": "GEMINI_LAYOUT_MODEL",
     "claude": "CLAUDE_LAYOUT_MODEL",
+    "local_hf": "LOCAL_HF_LAYOUT_MODEL",
 }
 
 PROVIDER_DEFAULT_MODELS = {
     "openai": "gpt-4.1",
     "gemini": "gemini-2.5-pro",
     "claude": "claude-sonnet-4-5",
+    "local_hf": "Qwen/Qwen3-4B-Instruct-2507",
 }
 
 
@@ -51,6 +56,7 @@ def generate_json(
             messages=messages,
             response_format=response_format,
             temperature=temperature,
+            max_tokens=max_tokens,
         )
     if provider_name == "gemini":
         return _gemini_generate_json(
@@ -65,6 +71,13 @@ def generate_json(
             model=model_name,
             messages=messages,
             assistant_prefill=assistant_prefill,
+            temperature=temperature,
+            max_tokens=max_tokens,
+        )
+    if provider_name == "local_hf":
+        return _local_hf_generate_json(
+            model=model_name,
+            messages=messages,
             temperature=temperature,
             max_tokens=max_tokens,
         )
@@ -102,18 +115,51 @@ def _openai_generate_json(
     messages: list[dict[str, str]],
     response_format: dict[str, object] | None,
     temperature: float,
+    max_tokens: int,
 ) -> str:
-    client = OpenAI(api_key=_api_key("openai"))
+    client_kwargs = {"api_key": _api_key("openai")}
+    base_url = os.environ.get("OPENAI_BASE_URL")
+    if base_url:
+        client_kwargs["base_url"] = base_url
+    client = OpenAI(**client_kwargs)
+    request_kwargs = {
+        "model": model,
+        "temperature": temperature,
+        "max_tokens": max_tokens,
+        "messages": messages,
+    }
+    response_mode = os.environ.get("OPENAI_RESPONSE_FORMAT_MODE", "auto").lower()
+    extra_body = _openai_extra_body_for_response_format(response_format, response_mode)
+    if extra_body:
+        request_kwargs["extra_body"] = extra_body
+    elif response_mode != "disabled":
+        request_kwargs["response_format"] = response_format or {"type": "json_object"}
     response = client.chat.completions.create(
-        model=model,
-        temperature=temperature,
-        response_format=response_format or {"type": "json_object"},
-        messages=messages,
+        **request_kwargs,
     )
     content = response.choices[0].message.content
     if content is None:
         raise RuntimeError("OpenAI returned an empty response.")
     return content
+
+
+def _openai_extra_body_for_response_format(
+    response_format: dict[str, object] | None,
+    response_mode: str,
+) -> dict[str, object] | None:
+    if not response_format:
+        return None
+    if response_format.get("type") != "json_schema":
+        return None
+    json_schema = response_format.get("json_schema", {})
+    if not isinstance(json_schema, dict) or "schema" not in json_schema:
+        return None
+    schema = json_schema["schema"]
+    if response_mode == "vllm_guided_json":
+        return {"guided_json": schema}
+    if response_mode == "vllm_structured_outputs":
+        return {"structured_outputs": {"json": schema}}
+    return None
 
 
 def _gemini_generate_json(
@@ -194,6 +240,77 @@ def _claude_generate_json(
         return content
     except (KeyError, TypeError) as error:
         raise RuntimeError(f"Claude returned an unexpected response: {data}") from error
+
+
+def _local_hf_generate_json(
+    *,
+    model: str,
+    messages: list[dict[str, str]],
+    temperature: float,
+    max_tokens: int,
+) -> str:
+    try:
+        import torch
+        from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
+    except ImportError as error:
+        raise RuntimeError(
+            "Local Hugging Face inference dependencies are missing. Install them with "
+            "`uv sync --extra lora --extra lora-quantized`."
+        ) from error
+
+    max_new_tokens = int(os.environ.get("LOCAL_HF_MAX_NEW_TOKENS", str(max_tokens)))
+    load_in_4bit = os.environ.get("LOCAL_HF_LOAD_IN_4BIT", "true").lower() == "true"
+    cache_key = (model, load_in_4bit)
+    if cache_key in _LOCAL_HF_CACHE:
+        tokenizer, causal_model = _LOCAL_HF_CACHE[cache_key]
+    else:
+        tokenizer = AutoTokenizer.from_pretrained(model)
+        model_kwargs = {
+            "torch_dtype": "auto",
+            "device_map": "auto",
+        }
+        if load_in_4bit:
+            model_kwargs["quantization_config"] = BitsAndBytesConfig(
+                load_in_4bit=True,
+                bnb_4bit_quant_type="nf4",
+                bnb_4bit_compute_dtype=torch.bfloat16,
+                bnb_4bit_use_double_quant=True,
+            )
+        causal_model = AutoModelForCausalLM.from_pretrained(model, **model_kwargs)
+        causal_model.eval()
+        _LOCAL_HF_CACHE[cache_key] = (tokenizer, causal_model)
+
+    prompt = _local_chat_prompt(tokenizer, messages)
+    inputs = tokenizer(prompt, return_tensors="pt")
+    input_device = next(causal_model.parameters()).device
+    inputs = {key: value.to(input_device) for key, value in inputs.items()}
+    generation_kwargs = {
+        **inputs,
+        "max_new_tokens": max_new_tokens,
+        "do_sample": temperature > 0,
+        "pad_token_id": tokenizer.eos_token_id,
+    }
+    if temperature > 0:
+        generation_kwargs["temperature"] = temperature
+    with torch.no_grad():
+        output_ids = causal_model.generate(**generation_kwargs)
+    generated_ids = output_ids[0][inputs["input_ids"].shape[-1] :]
+    return tokenizer.decode(generated_ids, skip_special_tokens=True)
+
+
+def _local_chat_prompt(tokenizer, messages: list[dict[str, str]]) -> str:
+    if getattr(tokenizer, "chat_template", None):
+        return tokenizer.apply_chat_template(
+            messages,
+            tokenize=False,
+            add_generation_prompt=True,
+        )
+    rendered = []
+    for message in messages:
+        role = message["role"].upper()
+        rendered.append(f"{role}:\n{message['content']}")
+    rendered.append("ASSISTANT:\n")
+    return "\n\n".join(rendered)
 
 
 def _gemini_messages(messages: list[dict[str, str]]) -> tuple[str, list[dict[str, object]]]:

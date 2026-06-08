@@ -7,9 +7,26 @@ __pycache__/
 .env
 .env.*
 !.env.example
-outputs/**/*.json
-outputs/**/*.jsonl
-outputs/**/*.csv
-outputs/**/*.html
-outputs/**/*.md
+
+# Generated experiment artifacts, datasets, reports, and model adapters.
+outputs/**
+!outputs/**/
 !outputs/**/.gitkeep
+
+# Local/cluster caches and logs.
+.cache/
+logs/
+*.log
+*.out
+*.err
+
+# Large model/training artifacts outside outputs/.
+*.safetensors
+*.pt
+*.pth
+*.bin
+*.gguf
+*.onnx
+
+
+*.pdf

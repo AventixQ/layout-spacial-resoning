@@ -67,7 +67,7 @@ def generate_layout(
         community_algorithm=community_algorithm,
         seed=seed,
     )
-    return refine_and_arrange_openai(
+    return refine_and_arrange_llm(
         controls,
         preliminary_division,
         model=model,

@@ -138,6 +138,8 @@ def test_build_lora_config_from_env(monkeypatch):
     monkeypatch.setenv("LORA_OUTPUT_DIR", "outputs/test-lora")
     monkeypatch.setenv("LORA_TARGET_MODULES", "q_proj,v_proj")
     monkeypatch.setenv("LORA_RANK", "8")
+    monkeypatch.setenv("LORA_SAVE_STEPS", "1000")
+    monkeypatch.setenv("LORA_RESUME_FROM_CHECKPOINT", "outputs/lora/checkpoint-200")
 
     config = build_lora_config_from_env()
 
@@ -145,6 +147,8 @@ def test_build_lora_config_from_env(monkeypatch):
     assert config.output_dir == "outputs/test-lora"
     assert config.target_modules == ("q_proj", "v_proj")
     assert config.lora_rank == 8
+    assert config.save_steps == 1000
+    assert config.resume_from_checkpoint == "outputs/lora/checkpoint-200"
     assert config.fail_on_truncation
 
 

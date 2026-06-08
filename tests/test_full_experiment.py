@@ -52,3 +52,37 @@ def test_missing_api_key_records_error(monkeypatch):
     assert records == []
     assert latency == []
     assert errors[0]["error_type"] == "MissingApiKey"
+
+
+def test_local_hf_plan_skips_structured_output_by_default(monkeypatch):
+    monkeypatch.setenv("EXPERIMENT_LLM_PROVIDERS", "local_hf")
+    monkeypatch.setenv("LOCAL_HF_LAYOUT_MODEL", "Qwen/test-model")
+    monkeypatch.delenv("LOCAL_HF_INCLUDE_STRUCTURED_OUTPUT", raising=False)
+
+    methods = {plan["method"] for plan in run_full_experiment.build_experiment_plan()}
+
+    assert "local_hf_qwen_test_model_llm_single_zero_shot" in methods
+    assert "local_hf_qwen_test_model_llm_single_cot" in methods
+    assert "local_hf_qwen_test_model_llm_single_structured_output" not in methods
+    assert "local_hf_qwen_test_model_llm_multi_agent" in methods
+    assert "local_hf_qwen_test_model_hybrid" in methods
+
+
+def test_local_hf_plan_can_include_structured_output(monkeypatch):
+    monkeypatch.setenv("EXPERIMENT_LLM_PROVIDERS", "local_hf")
+    monkeypatch.setenv("LOCAL_HF_LAYOUT_MODEL", "Qwen/test-model")
+    monkeypatch.setenv("LOCAL_HF_INCLUDE_STRUCTURED_OUTPUT", "true")
+
+    methods = {plan["method"] for plan in run_full_experiment.build_experiment_plan()}
+
+    assert "local_hf_qwen_test_model_llm_single_structured_output" in methods
+
+
+def test_experiment_methods_can_select_only_hybrid(monkeypatch):
+    monkeypatch.setenv("EXPERIMENT_LLM_PROVIDERS", "gemini")
+    monkeypatch.setenv("GEMINI_LAYOUT_MODEL", "gemini-test")
+    monkeypatch.setenv("EXPERIMENT_METHODS", "hybrid")
+
+    methods = [plan["method"] for plan in run_full_experiment.build_experiment_plan()]
+
+    assert methods == ["gemini_gemini_test_hybrid"]
