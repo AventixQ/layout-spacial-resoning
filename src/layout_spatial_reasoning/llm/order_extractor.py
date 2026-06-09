@@ -4,10 +4,10 @@ import json
 import os
 from pathlib import Path
 
-from openai import OpenAI
 from pydantic import BaseModel, ConfigDict, Field
 
 from layout_spatial_reasoning.config import load_env
+from layout_spatial_reasoning.llm.providers import generate_json
 from layout_spatial_reasoning.schemas.control import Control
 from layout_spatial_reasoning.schemas.form import OrderConstraint
 
@@ -34,26 +34,31 @@ def extract_order_constraints_openai(
     model: str | None = None,
 ) -> list[OrderConstraint]:
     """Extract reading-order constraints with an OpenAI chat model."""
-    load_env()
-    api_key = os.environ.get("OPENAI_API_KEY")
-    if not api_key:
-        raise RuntimeError("OPENAI_API_KEY is required for OrderExtractor.")
+    return extract_order_constraints_llm(controls, provider="openai", model=model)
 
+
+def extract_order_constraints_llm(
+    controls: list[Control],
+    *,
+    provider: str = "gemini",
+    model: str | None = None,
+) -> list[OrderConstraint]:
+    """Extract reading-order constraints with a configured LLM provider."""
+    load_env()
     prompt = PROMPT_PATH.read_text(encoding="utf-8")
-    model_name = model or os.environ.get("OPENAI_ORDER_MODEL", "gpt-4.1-mini")
-    client = OpenAI(api_key=api_key)
-    response = client.chat.completions.create(
+    provider_name = provider.lower().strip()
+    model_name = model or _default_order_model(provider_name)
+    content = generate_json(
+        provider_name,
         model=model_name,
         temperature=0,
-        response_format={"type": "json_object"},
+        max_tokens=2048,
+        response_format=_order_constraint_response_format(),
         messages=[
             {"role": "system", "content": prompt},
             {"role": "user", "content": _controls_payload(controls)},
         ],
     )
-    content = response.choices[0].message.content
-    if content is None:
-        raise RuntimeError("OrderExtractor returned an empty response.")
 
     raw_response = _RawOrderConstraintResponse.model_validate_json(content)
     raw_constraints = [
@@ -61,6 +66,45 @@ def extract_order_constraints_openai(
         for item in raw_response.constraints
     ]
     return validate_order_constraints(raw_constraints, controls)
+
+
+def _default_order_model(provider: str) -> str:
+    if provider == "gemini":
+        return os.environ.get("GEMINI_ORDER_MODEL", "gemini-3.1-flash-lite")
+    if provider == "openai":
+        return os.environ.get("OPENAI_ORDER_MODEL", "gpt-5.4-mini")
+    if provider == "claude":
+        return os.environ.get("CLAUDE_ORDER_MODEL", "claude-haiku-4-5")
+    return ""
+
+
+def _order_constraint_response_format() -> dict[str, object]:
+    return {
+        "type": "json_schema",
+        "json_schema": {
+            "name": "order_constraints",
+            "strict": True,
+            "schema": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "constraints": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "additionalProperties": False,
+                            "properties": {
+                                "before": {"type": "string", "minLength": 1},
+                                "after": {"type": "string", "minLength": 1},
+                            },
+                            "required": ["before", "after"],
+                        },
+                    }
+                },
+                "required": ["constraints"],
+            },
+        },
+    }
 
 
 def validate_order_constraints(

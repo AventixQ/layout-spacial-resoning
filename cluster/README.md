@@ -136,3 +136,16 @@ To include vLLM guided structured output in the same job:
 ```bash
 sbatch --export=ALL,VLLM_MODEL=Qwen/Qwen3-4B-Instruct-2507,EXPERIMENT_LIMIT=0,OPENAI_RESPONSE_FORMAT_MODE=vllm_guided_json,EXPERIMENT_SINGLE_VARIANTS=zero_shot,few_shot,cot,structured_output cluster/layout_vllm_api_val_test.sbatch
 ```
+
+For a two-GPU run, use the 2-GPU wrapper. It requests two RTX 4090 cards and
+starts vLLM with tensor parallelism:
+
+```bash
+export VLLM_MODEL=Qwen/Qwen3-8B
+export VLLM_SPLITS=val
+export EXPERIMENT_LIMIT=0
+export OPENAI_RESPONSE_FORMAT_MODE=vllm_guided_json
+export EXPERIMENT_SINGLE_VARIANTS=zero_shot,few_shot,cot
+export EXPERIMENT_METHODS=single_zero_shot,single_few_shot,single_cot
+sbatch --export=ALL cluster/layout_vllm_api_val_test_2gpu.sbatch
+```

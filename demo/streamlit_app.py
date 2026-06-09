@@ -12,6 +12,7 @@ from layout_spatial_reasoning.config import env_str
 from layout_spatial_reasoning.dataset import load_forms_jsonl
 from layout_spatial_reasoning.embeddings.provider import embed_texts, openai_embed_texts
 from layout_spatial_reasoning.evaluation.metrics import evaluate_generated_layout
+from layout_spatial_reasoning.llm.order_extractor import extract_order_constraints_llm
 from layout_spatial_reasoning.methods.fine_tuned_model import (
     generate_layout as fine_tuned_layout,
 )
@@ -24,7 +25,12 @@ from layout_spatial_reasoning.methods.llm_single import generate_layout as llm_s
 from layout_spatial_reasoning.methods.random_baseline import generate_layout as random_layout
 from layout_spatial_reasoning.methods.sequential_baseline import generate_layout as sequential_layout
 from layout_spatial_reasoning.rendering.html_renderer import render_html
-from layout_spatial_reasoning.schemas import Control, FormSpec, GeneratedLayoutRecord
+from layout_spatial_reasoning.schemas import (
+    Control,
+    FormSpec,
+    GeneratedLayoutRecord,
+    OrderConstraint,
+)
 
 
 CONTROL_TYPES = [
@@ -119,6 +125,17 @@ def main() -> None:
             )
 
         st.subheader("Evaluation settings")
+        order_constraint_mode = st.selectbox(
+            "Reading-order constraints",
+            ["extract with Gemini", "use sample constraints", "none"],
+            index=0,
+        )
+        order_model = st.text_input(
+            "Gemini order model",
+            value=env_str("GEMINI_ORDER_MODEL", "gemini-3.1-flash-lite")
+            or "gemini-3.1-flash-lite",
+            disabled=order_constraint_mode != "extract with Gemini",
+        )
         metric_embedding_provider = st.selectbox(
             "Metric embeddings",
             ["local", "openai"],
@@ -141,6 +158,12 @@ def main() -> None:
                     graph_threshold,
                     llm_model,
                 )
+                order_constraints, order_warning = _order_constraints_for_demo(
+                    selected_form,
+                    controls,
+                    order_constraint_mode,
+                    order_model,
+                )
                 effective_graph_provider = graph_embedding_provider
             except Exception as error:  # noqa: BLE001 - user-facing demo.
                 if method not in {"graph_community", "hybrid"} or graph_embedding_provider != "openai":
@@ -157,10 +180,19 @@ def main() -> None:
                     graph_threshold,
                     llm_model,
                 )
+                order_constraints, order_warning = _order_constraints_for_demo(
+                    selected_form,
+                    controls,
+                    order_constraint_mode,
+                    order_model,
+                )
                 effective_graph_provider = "local"
+            if order_warning:
+                st.warning(order_warning)
             st.session_state["layout"] = layout
             st.session_state["method"] = method
             st.session_state["controls"] = controls
+            st.session_state["order_constraints"] = order_constraints
             st.session_state["metric_embedding_provider"] = metric_embedding_provider
             st.session_state["graph_embedding_provider"] = effective_graph_provider
 
@@ -171,6 +203,7 @@ def main() -> None:
     layout = st.session_state["layout"]
     method = st.session_state["method"]
     controls = st.session_state["controls"]
+    order_constraints = st.session_state.get("order_constraints", [])
     metric_embedding_provider = st.session_state.get(
         "metric_embedding_provider",
         metric_embedding_provider,
@@ -189,6 +222,7 @@ def main() -> None:
             controls,
             layout,
             metric_embedding_provider,
+            order_constraints,
         )
         if effective_provider != metric_embedding_provider:
             st.warning("OpenAI metric embeddings failed, so metrics were computed with local embeddings.")
@@ -280,8 +314,14 @@ def _evaluate(
     controls: list[Control],
     layout,
     embedding_provider: str,
+    order_constraints: list[OrderConstraint] | None = None,
 ):
-    demo_form = form.model_copy(update={"controls": controls})
+    demo_form = form.model_copy(
+        update={
+            "controls": controls,
+            "order_constraints": order_constraints or [],
+        }
+    )
     generated = GeneratedLayoutRecord(
         form_id=demo_form.form_id,
         method=method,
@@ -300,14 +340,64 @@ def _safe_evaluate(
     controls: list[Control],
     layout,
     embedding_provider: str,
+    order_constraints: list[OrderConstraint] | None = None,
 ):
     try:
-        return _evaluate(method, form, controls, layout, embedding_provider), embedding_provider
+        return (
+            _evaluate(
+                method,
+                form,
+                controls,
+                layout,
+                embedding_provider,
+                order_constraints,
+            ),
+            embedding_provider,
+        )
     except Exception as error:
         if embedding_provider != "openai":
             raise
         st.caption(f"Metric embedding fallback reason: {type(error).__name__}")
-        return _evaluate(method, form, controls, layout, "local"), "local"
+        return (
+            _evaluate(method, form, controls, layout, "local", order_constraints),
+            "local",
+        )
+
+
+def _order_constraints_for_demo(
+    form: FormSpec,
+    controls: list[Control],
+    mode: str,
+    model: str | None,
+) -> tuple[list[OrderConstraint], str | None]:
+    if mode == "none":
+        return [], None
+    if mode == "use sample constraints":
+        return _valid_sample_order_constraints(form, controls), None
+    try:
+        constraints = extract_order_constraints_llm(
+            controls,
+            provider="gemini",
+            model=model or None,
+        )
+        return constraints, None
+    except Exception as error:  # noqa: BLE001 - user-facing demo fallback.
+        return [], (
+            "Gemini reading-order extraction failed, so reading-order metrics "
+            f"were computed without constraints. Original error: {type(error).__name__}: {error}"
+        )
+
+
+def _valid_sample_order_constraints(
+    form: FormSpec,
+    controls: list[Control],
+) -> list[OrderConstraint]:
+    control_ids = {control.id for control in controls}
+    return [
+        constraint
+        for constraint in form.order_constraints
+        if constraint.before in control_ids and constraint.after in control_ids
+    ]
 
 
 def _embedding_function(provider: str):

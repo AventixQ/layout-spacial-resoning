@@ -38,8 +38,10 @@ PORT="${VLLM_PORT:-8000}"
 IMAGE="${VLLM_IMAGE:-/home/s504297/vllm901.sif}"
 MAX_MODEL_LEN="${VLLM_MAX_MODEL_LEN:-8192}"
 GPU_MEMORY_UTILIZATION="${VLLM_GPU_MEMORY_UTILIZATION:-0.90}"
+TENSOR_PARALLEL_SIZE="${VLLM_TENSOR_PARALLEL_SIZE:-1}"
 SERVED_MODEL_NAME="${VLLM_SERVED_MODEL_NAME:-layout-local-model}"
 SPLITS="${VLLM_SPLITS:-val,test}"
+RUN_SUFFIX="${VLLM_RUN_SUFFIX:-}"
 
 if command -v apptainer >/dev/null 2>&1; then
   CONTAINER_RUNTIME="apptainer"
@@ -76,7 +78,7 @@ if [[ ",$EXPERIMENT_SINGLE_VARIANTS," == *",structured_output,"* ]] && [[ ",$EXP
   export EXPERIMENT_METHODS="${EXPERIMENT_METHODS},single_structured_output"
 fi
 
-SERVER_RUN_ID="vllm_${SAFE_MODEL}_val_test_${LIMIT_TAG}"
+SERVER_RUN_ID="vllm_${SAFE_MODEL}_val_test_${LIMIT_TAG}${RUN_SUFFIX}"
 
 nvidia-smi
 echo "Node        : $(hostname)"
@@ -84,8 +86,10 @@ echo "Model       : $MODEL"
 echo "Served name : $SERVED_MODEL_NAME"
 echo "Image       : $IMAGE"
 echo "Base URL    : $OPENAI_BASE_URL"
+echo "Tensor par. : $TENSOR_PARALLEL_SIZE"
 echo "Splits      : $SPLITS"
 echo "Limit       : $EXPERIMENT_LIMIT"
+echo "Run suffix  : ${RUN_SUFFIX:-<none>}"
 echo "Methods     : $EXPERIMENT_METHODS"
 echo "Single vars : $EXPERIMENT_SINGLE_VARIANTS"
 echo "Resp format : $OPENAI_RESPONSE_FORMAT_MODE"
@@ -101,6 +105,7 @@ echo "Resp format : $OPENAI_RESPONSE_FORMAT_MODE"
     --port "$PORT" \
     --dtype auto \
     --max-model-len "$MAX_MODEL_LEN" \
+    --tensor-parallel-size "$TENSOR_PARALLEL_SIZE" \
     --gpu-memory-utilization "$GPU_MEMORY_UTILIZATION" \
     > "/home/s504297/jobs/logs/${SERVER_RUN_ID}_vllm_server.log" 2>&1 &
 
@@ -127,7 +132,7 @@ IFS=',' read -ra SPLIT_LIST <<< "$SPLITS"
 for split in "${SPLIT_LIST[@]}"; do
   split="$(printf '%s' "$split" | xargs)"
   export FORMS_PATH="data/splits/${split}.jsonl"
-  export EXPERIMENT_RUN_ID="vllm_${SAFE_MODEL}_${split}_${LIMIT_TAG}"
+  export EXPERIMENT_RUN_ID="vllm_${SAFE_MODEL}_${split}_${LIMIT_TAG}${RUN_SUFFIX}"
 
   echo "Running split=$split"
   echo "Run ID: $EXPERIMENT_RUN_ID"

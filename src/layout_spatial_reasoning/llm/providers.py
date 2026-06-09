@@ -125,9 +125,9 @@ def _openai_generate_json(
     request_kwargs = {
         "model": model,
         "temperature": temperature,
-        "max_tokens": max_tokens,
         "messages": messages,
     }
+    request_kwargs.update(_openai_token_limit_kwargs(model, max_tokens))
     response_mode = os.environ.get("OPENAI_RESPONSE_FORMAT_MODE", "auto").lower()
     extra_body = _openai_extra_body_for_response_format(response_format, response_mode)
     if extra_body:
@@ -141,6 +141,26 @@ def _openai_generate_json(
     if content is None:
         raise RuntimeError("OpenAI returned an empty response.")
     return content
+
+
+def _openai_token_limit_kwargs(model: str, max_tokens: int) -> dict[str, int]:
+    token_parameter = os.environ.get("OPENAI_TOKEN_PARAMETER", "auto").lower()
+    if token_parameter in {"max_completion_tokens", "completion"}:
+        return {"max_completion_tokens": max_tokens}
+    if token_parameter in {"max_tokens", "tokens"}:
+        return {"max_tokens": max_tokens}
+
+    base_url = os.environ.get("OPENAI_BASE_URL", "")
+    if base_url and "api.openai.com" not in base_url:
+        return {"max_tokens": max_tokens}
+    if _openai_model_prefers_max_completion_tokens(model):
+        return {"max_completion_tokens": max_tokens}
+    return {"max_tokens": max_tokens}
+
+
+def _openai_model_prefers_max_completion_tokens(model: str) -> bool:
+    normalized = model.lower()
+    return normalized.startswith(("gpt-5", "o1", "o3", "o4"))
 
 
 def _openai_extra_body_for_response_format(
