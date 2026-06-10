@@ -124,9 +124,9 @@ def _openai_generate_json(
     client = OpenAI(**client_kwargs)
     request_kwargs = {
         "model": model,
-        "temperature": temperature,
         "messages": messages,
     }
+    request_kwargs.update(_openai_temperature_kwargs(model, temperature))
     request_kwargs.update(_openai_token_limit_kwargs(model, max_tokens))
     response_mode = os.environ.get("OPENAI_RESPONSE_FORMAT_MODE", "auto").lower()
     extra_body = _openai_extra_body_for_response_format(response_format, response_mode)
@@ -161,6 +161,22 @@ def _openai_token_limit_kwargs(model: str, max_tokens: int) -> dict[str, int]:
 def _openai_model_prefers_max_completion_tokens(model: str) -> bool:
     normalized = model.lower()
     return normalized.startswith(("gpt-5", "o1", "o3", "o4"))
+
+
+def _openai_temperature_kwargs(model: str, temperature: float) -> dict[str, float]:
+    mode = os.environ.get("OPENAI_TEMPERATURE_PARAMETER", "auto").lower()
+    if mode in {"omit", "disabled", "default"}:
+        return {}
+    if mode in {"send", "temperature"}:
+        return {"temperature": temperature}
+    if _openai_model_uses_default_temperature_only(model):
+        return {}
+    return {"temperature": temperature}
+
+
+def _openai_model_uses_default_temperature_only(model: str) -> bool:
+    normalized = model.lower()
+    return normalized.startswith(("gpt-5.4", "gpt-5.5"))
 
 
 def _openai_extra_body_for_response_format(

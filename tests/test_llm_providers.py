@@ -1,5 +1,6 @@
 from layout_spatial_reasoning.llm.providers import (
     _openai_extra_body_for_response_format,
+    _openai_temperature_kwargs,
     _openai_token_limit_kwargs,
 )
 from layout_spatial_reasoning.methods.llm_single import _layout_json_schema
@@ -57,3 +58,22 @@ def test_openai_compatible_base_url_keeps_max_tokens(monkeypatch):
     monkeypatch.delenv("OPENAI_TOKEN_PARAMETER", raising=False)
 
     assert _openai_token_limit_kwargs("layout-local-model", 123) == {"max_tokens": 123}
+
+
+def test_openai_default_temperature_only_models_omit_temperature(monkeypatch):
+    monkeypatch.delenv("OPENAI_TEMPERATURE_PARAMETER", raising=False)
+
+    assert _openai_temperature_kwargs("gpt-5.5", 0) == {}
+    assert _openai_temperature_kwargs("gpt-5.4-mini", 0) == {}
+
+
+def test_openai_other_models_keep_temperature(monkeypatch):
+    monkeypatch.delenv("OPENAI_TEMPERATURE_PARAMETER", raising=False)
+
+    assert _openai_temperature_kwargs("gpt-4.1", 0) == {"temperature": 0}
+
+
+def test_openai_temperature_parameter_can_be_forced(monkeypatch):
+    monkeypatch.setenv("OPENAI_TEMPERATURE_PARAMETER", "send")
+
+    assert _openai_temperature_kwargs("gpt-5.5", 0) == {"temperature": 0}

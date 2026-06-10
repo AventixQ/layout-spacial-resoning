@@ -67,6 +67,22 @@ def test_run_statistical_tests_applies_bonferroni_correction():
     assert result["error_frequencies"]["test"] == "chi_square_independence"
 
 
+def test_run_statistical_tests_skips_empty_frame():
+    result = run_statistical_tests(pd.DataFrame(), alpha=0.05)
+
+    assert result["quality_metrics"]["grid_utilization"]["skipped"] is True
+    assert result["error_frequencies"]["skipped"] is True
+
+
+def test_friedman_quality_metric_test_skips_missing_metric_column():
+    result = friedman_quality_metric_test(
+        pd.DataFrame([{"form_id": "f1", "method": "m1"}]),
+        "grid_utilization",
+    )
+
+    assert result["skipped"] is True
+
+
 def _metrics_frame() -> pd.DataFrame:
     rows = []
     for index in range(1, 5):

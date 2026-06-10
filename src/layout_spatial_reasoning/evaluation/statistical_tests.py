@@ -59,6 +59,15 @@ def friedman_quality_metric_test(
     alpha: float = 0.05,
 ) -> dict[str, Any]:
     """Compare methods on one repeated-measures quality metric."""
+    required_columns = {"form_id", "method", metric}
+    missing_columns = required_columns - set(frame.columns)
+    if missing_columns:
+        return _skipped_result(
+            "Friedman test requires columns: "
+            + ", ".join(sorted(required_columns))
+            + "."
+        )
+
     pivot = (
         frame.pivot_table(
             index="form_id",
@@ -190,6 +199,9 @@ def chi_square_error_frequency_test(
 
 def error_frequency_table(frame: pd.DataFrame) -> pd.DataFrame:
     """Build method x error-category table from form-level error flags."""
+    if "method" not in frame.columns:
+        return pd.DataFrame()
+
     columns = [
         column
         for column in ERROR_FORM_LEVEL_COLUMNS.values()
